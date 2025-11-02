@@ -25,13 +25,8 @@ fn utf16leDecode(chars: []const u16) !u21 {
     }
 }
 
-fn ctUtf8EncodeChar(comptime codepoint: u21) []const u8 {
-    var buf: [4]u8 = undefined;
-    return buf[0 .. std.unicode.utf8Encode(codepoint, &buf) catch unreachable];
-}
-
 fn checkAscii(comptime codepoint: u21) void {
-    if (codepoint > 127) @compileError("Cannot match character '" ++ ctUtf8EncodeChar(codepoint) ++ "' in ascii mode.");
+    if (codepoint > 127) @compileError("Cannot match character '" ++ std.unicode.utf8EncodeComptime(codepoint) ++ "' in ascii mode.");
 }
 
 fn charLenInEncoding(comptime codepoint: u21, comptime encoding: Encoding) usize {
@@ -46,29 +41,43 @@ fn charLenInEncoding(comptime codepoint: u21, comptime encoding: Encoding) usize
     }
 }
 
-fn ctEncode(comptime str: []const u21, comptime encoding: Encoding) []const encoding.CharT() {
-    if (encoding == .codepoint) return str;
-
+fn ctLenInEncoding(comptime str: []const u21, comptime encoding: Encoding) usize {
+    @setEvalBranchQuota(10000);
     var len: usize = 0;
     for (str) |c| len += charLenInEncoding(c, encoding);
+    return len;
+}
 
-    var result: [len]encoding.CharT() = undefined;
+fn ctEncode(comptime str: []const u21, comptime encoding: Encoding) [ctLenInEncoding(str, encoding)]encoding.CharT() {
+    @setEvalBranchQuota(20000);
+
+    comptime var result: [ctLenInEncoding(str, encoding)]encoding.CharT() = undefined;
     var idx: usize = 0;
     for (str) |c| {
         switch (encoding) {
             .ascii => {
-                result[idx] = @truncate(u8, c);
+                result[idx] = @truncate(c);
                 idx += 1;
             },
-            .utf8 => idx += std.unicode.utf8Encode(c, result[idx..]) catch unreachable,
-            .utf16le => {
-                const utf8_c = ctUtf8EncodeChar(c);
-                idx += std.unicode.utf8ToUtf16Le(result[idx..], utf8_c) catch unreachable;
+            .utf8 => {
+                for (std.unicode.utf8EncodeComptime(c)) |t| {
+                    result[idx] = t;
+                    idx += 1;
+                }
             },
-            .codepoint => unreachable,
+            .utf16le => {
+                for (std.unicode.utf8ToUtf16LeStringLiteral(&std.unicode.utf8EncodeComptime(c))) |t| {
+                    result[idx] = t;
+                    idx += 1;
+                }
+            },
+            .codepoint => {
+                result[idx] = c;
+                idx += 1;
+            },
         }
     }
-    return &result;
+    return result;
 }
 
 fn ctIntStr(comptime int: anytype) []const u8 {
@@ -112,7 +121,7 @@ const RegexParser = struct {
     fn skipWhitespace(comptime parser: *RegexParser) void {
         while (parser.iterator.i < parser.iterator.bytes.len and
             (parser.iterator.bytes[parser.iterator.i] == ' ' or
-            parser.iterator.bytes[parser.iterator.i] == '\t')) : (parser.iterator.i += 1)
+                parser.iterator.bytes[parser.iterator.i] == '\t')) : (parser.iterator.i += 1)
         {}
     }
 
@@ -337,15 +346,15 @@ const RegexParser = struct {
     fn parseAsciiIdent(comptime parser: *RegexParser) []const u8 {
         var c = parser.peek() orelse parser.raiseError("Expected ascii identifier", .{});
         if (c > 127) parser.raiseError("Expected ascii character in identifier, got '{}'", .{c});
-        if (c != '_' and !std.ascii.isAlpha(@truncate(u8, c))) {
+        if (c != '_' and !std.ascii.isAlphabetic(@truncate(c))) {
             parser.raiseError("Identifier must start with '_' or a letter, got '{}''", .{c});
         }
-        var res: []const u8 = &[1]u8{@truncate(u8, parser.iterator.nextCodepoint() orelse unreachable)};
+        var res: []const u8 = &[1]u8{@truncate(parser.iterator.nextCodepoint() orelse unreachable)};
         readChars: while (true) {
             c = parser.peek() orelse break :readChars;
-            if (c > 127 or (c != '_' and !std.ascii.isAlNum(@truncate(u8, c))))
+            if (c > 127 or (c != '_' and !std.ascii.isAlphanumeric(@truncate(c))))
                 break :readChars;
-            res = res ++ &[1]u8{@truncate(u8, parser.iterator.nextCodepoint() orelse unreachable)};
+            res = res ++ &[1]u8{@truncate(parser.iterator.nextCodepoint() orelse unreachable)};
         }
         return res;
     }
@@ -356,11 +365,11 @@ const RegexParser = struct {
 
     fn maybeParseNaturalNum(comptime parser: *RegexParser) ?usize {
         var c = parser.peek() orelse return null;
-        if (c > 127 or !std.ascii.isDigit(@truncate(u8, c))) return null;
+        if (c > 127 or !std.ascii.isDigit(@truncate(c))) return null;
         var res: usize = (parser.iterator.nextCodepoint() orelse unreachable) - '0';
         readChars: while (true) {
             c = parser.peek() orelse break :readChars;
-            if (c > 127 or !std.ascii.isDigit(@truncate(u8, c))) break :readChars;
+            if (c > 127 or !std.ascii.isDigit(@truncate(c))) break :readChars;
             res = res * 10 + ((parser.iterator.nextCodepoint() orelse unreachable) - '0');
         }
         return res;
@@ -548,7 +557,7 @@ const RegexParser = struct {
             const lhs_len = self.lhs.minLen(encoding);
             if (self.rhs) |rhs| {
                 const rhs_len = rhs.minLen(encoding);
-                return std.math.min(lhs_len, rhs_len);
+                return @min(lhs_len, rhs_len);
             }
             return lhs_len;
         }
@@ -570,7 +579,7 @@ const RegexParser = struct {
                 .literal => |codepoint_str| block: {
                     var str: []const u8 = "literal<";
                     for (codepoint_str) |codepoint| {
-                        str = str ++ ctUtf8EncodeChar(codepoint);
+                        str = str ++ std.unicode.utf8EncodeComptime(codepoint);
                     }
                     break :block str ++ ">";
                 },
@@ -630,11 +639,11 @@ const RegexParser = struct {
         fn ctStr(comptime self: Brackets) []const u8 {
             var str: []const u8 = "[";
             if (self.is_exclusive) str = str ++ "<not> ";
-            for (self.rules) |rule, idx| {
+            for (self.rules, 0..) |rule, idx| {
                 if (idx > 0) str = str ++ " ";
                 str = str ++ switch (rule) {
-                    .char => |c| ctUtf8EncodeChar(c),
-                    .range => |r| ctUtf8EncodeChar(r.start) ++ "-" ++ ctUtf8EncodeChar(r.end),
+                    .char => |c| std.unicode.utf8EncodeComptime(c),
+                    .range => |r| std.unicode.utf8EncodeComptime(r.start) ++ "-" ++ std.unicode.utf8EncodeComptime(r.end),
                     .char_class => |class| charClassToString(class),
                 };
             }
@@ -646,7 +655,7 @@ const RegexParser = struct {
             if (self.is_exclusive) return 1;
             var min_len: usize = std.math.maxInt(usize);
             for (self.rules) |rule| {
-                var curr_len: usize = switch (rule) {
+                const curr_len: usize = switch (rule) {
                     .char => |c| charLenInEncoding(c, encoding),
                     .range => |range| charLenInEncoding(range.start, encoding),
                     .char_class => |class| charClassMinLen(class, encoding),
@@ -675,38 +684,30 @@ pub const Encoding = enum {
 };
 
 inline fn readOneChar(comptime options: MatchOptions, str: []const options.encoding.CharT()) !@TypeOf(str) {
-    switch (options.encoding) {
-        .ascii, .codepoint => return str[0..1],
-        .utf8 => return str[0..try std.unicode.utf8ByteSequenceLength(str[0])],
-        .utf16le => return str[0..try utf16leCharSequenceLength(str[0])],
-    }
+    return switch (options.encoding) {
+        .ascii, .codepoint => str[0..1],
+        .utf8 => str[0..try std.unicode.utf8ByteSequenceLength(str[0])],
+        .utf16le => str[0..try utf16leCharSequenceLength(str[0])],
+    };
 }
 
 inline fn inCharClass(comptime class: u21, cp: u21) bool {
-    switch (class) {
-        'd' => return cp >= '0' and cp <= '9',
-        's' => {
-            // TODO Include same chars as PCRE
-            return cp == ' ' or cp == '\t';
-        },
+    return switch (class) {
+        'd' => cp >= '0' and cp <= '9',
+        's' => cp == ' ' or cp == '\t', // TODO Include same chars as PCRE
         else => unreachable,
-    }
+    };
 }
 
 inline fn readCharClass(comptime class: u21, comptime options: MatchOptions, str: []const options.encoding.CharT()) ?@TypeOf(str) {
-    switch (class) {
-        'd' => {
-            switch (options.encoding) {
-                .ascii, .utf8 => return if (std.ascii.isDigit(str[0])) str[0..1] else null,
-                .codepoint, .utf16le => return if (str[0] >= '0' and str[0] <= '9') str[0..1] else null,
-            }
+    return switch (class) {
+        'd' => switch (options.encoding) {
+            .ascii, .utf8 => if (std.ascii.isDigit(str[0])) str[0..1] else null,
+            .codepoint, .utf16le => if (str[0] >= '0' and str[0] <= '9') str[0..1] else null,
         },
-        's' => {
-            // TODO Include same chars as PCRE
-            return if (str[0] == ' ' or str[0] == '\t') str[0..1] else null;
-        },
+        's' => if (str[0] == ' ' or str[0] == '\t') str[0..1] else null, // TODO Include same chars as PCRE
         else => unreachable,
-    }
+    };
 }
 
 inline fn matchAtom(comptime atom: RegexParser.Atom, comptime options: MatchOptions, str: []const options.encoding.CharT(), result: anytype) !?@TypeOf(str) {
@@ -725,27 +726,22 @@ inline fn matchAtom(comptime atom: RegexParser.Atom, comptime options: MatchOpti
         .char_class => |class| return readCharClass(class, options, str),
         .literal => |lit| {
             const encoded_lit = comptime ctEncode(lit, options.encoding);
-            if (std.mem.eql(options.encoding.CharT(), encoded_lit, str[0..encoded_lit.len])) {
+            if (std.mem.eql(options.encoding.CharT(), encoded_lit[0..], str[0..encoded_lit.len])) {
                 return str[0..encoded_lit.len];
             }
             return null;
         },
         .brackets => |brackets| {
-            var this_slice: @TypeOf(str) = undefined;
+            const this_slice: @TypeOf(str) = switch (options.encoding) {
+                .codepoint, .ascii => str[0..1],
+                .utf8 => str[0..try std.unicode.utf8ByteSequenceLength(str[0])],
+                .utf16le => str[0..try utf16leCharSequenceLength(str[0])],
+            };
 
             const this_cp: u21 = switch (options.encoding) {
-                .codepoint, .ascii => block: {
-                    this_slice = str[0..1];
-                    break :block str[0];
-                },
-                .utf8 => block: {
-                    this_slice = str[0..try std.unicode.utf8ByteSequenceLength(str[0])];
-                    break :block try std.unicode.utf8Decode(this_slice);
-                },
-                .utf16le => block: {
-                    this_slice = str[0..try utf16leCharSequenceLength(str[0])];
-                    break :block try utf16leDecode(this_slice);
-                },
+                .codepoint, .ascii => str[0],
+                .utf8 => try std.unicode.utf8Decode(this_slice),
+                .utf16le => try utf16leDecode(this_slice),
             };
 
             inline for (brackets.rules) |rule| {
@@ -835,7 +831,7 @@ inline fn matchSubExpr(comptime sub_expr: RegexParser.SubExpr, comptime options:
                         }
                     } else {
                         // TODO Using an inline while here crashes the compiler in codegen
-                        var curr_additional_rep: usize = 0;
+                        const curr_additional_rep: usize = 0;
                         _ = curr_additional_rep;
                         while (curr_rep < range.max) : (curr_rep += 1) {
                             if (try matchAtom(atom.data, options, str[curr_slice.len..], result)) |matched_slice| {
@@ -885,7 +881,7 @@ pub fn MatchResult(comptime regex: []const u8, comptime options: MatchOptions) t
     if (RegexParser.parse(regex)) |parsed| {
         const capture_len = parsed.captures.len;
         var capture_names: [capture_len]?[]const u8 = undefined;
-        for (parsed.captures) |capt, idx| {
+        for (parsed.captures, 0..) |capt, idx| {
             if (capt.capture_info) |info| {
                 capture_names[idx] = info.name;
             }
@@ -903,20 +899,15 @@ pub fn MatchResult(comptime regex: []const u8, comptime options: MatchOptions) t
                 self.captures = [1]?[]const CharT{null} ** capture_len;
             }
 
-            pub usingnamespace if (capture_len != 0)
-                struct {
-                    pub fn capture(self: Self, comptime name: []const u8) ?[]const CharT {
-                        inline for (capture_names2) |maybe_name, curr_idx| {
-                            if (maybe_name) |curr_name| {
-                                if (comptime std.mem.eql(u8, name, curr_name))
-                                    return self.captures[curr_idx];
-                            }
-                        }
-                        @compileError("No capture named '" ++ name ++ "'");
+            pub fn capture(self: Self, comptime name: []const u8) ?[]const CharT {
+                inline for (capture_names2, 0..) |maybe_name, curr_idx| {
+                    if (maybe_name) |curr_name| {
+                        if (comptime std.mem.eql(u8, name, curr_name))
+                            return self.captures[curr_idx];
                     }
                 }
-            else
-                struct {};
+                @compileError("No capture named '" ++ name ++ "'");
+            }
         };
     }
     return void;

@@ -2,30 +2,40 @@ const ctregex = @import("ctregex.zig");
 const std = @import("std");
 const expect = std.testing.expect;
 
-fn encodeStr(comptime encoding: ctregex.Encoding, comptime str: []const u8) []const encoding.CharT() {
+fn encodeLen(comptime encoding: ctregex.Encoding, comptime str: []const u8) usize {
     return switch (encoding) {
-        .ascii, .utf8 => str,
-        .utf16le => block: {
-            var temp: [str.len]u16 = undefined;
-            break :block temp[0 .. std.unicode.utf8ToUtf16Le(&temp, str) catch unreachable];
+        .utf16le => std.unicode.calcUtf16LeLen(str) catch unreachable,
+        else => str.len,
+    };
+}
+
+fn encodeStr(comptime encoding: ctregex.Encoding, comptime str: []const u8) [encodeLen(encoding, str)]encoding.CharT() {
+    comptime var temp: [encodeLen(encoding, str)]encoding.CharT() = undefined;
+    switch (encoding) {
+        .ascii, .utf8 => {
+            for (&temp, str) |*p, c|
+                p.* = c;
         },
-        .codepoint => block: {
-            var temp: [str.len]u21 = undefined;
+        .utf16le => {
+            for (&temp, std.unicode.utf8ToUtf16LeStringLiteral(str)) |*p, c|
+                p.* = c;
+        },
+        .codepoint => {
             var idx = 0;
             var it = std.unicode.Utf8View.initComptime(str).iterator();
             while (it.nextCodepoint()) |cp| {
                 temp[idx] = cp;
                 idx += 1;
             }
-            break :block temp[0..idx];
         },
-    };
+    }
+    return temp;
 }
 
 fn testMatch(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const u8) !void {
     const encoded_str = comptime encodeStr(encoding, str);
-    try expect((try ctregex.match(regex, .{ .encoding = encoding }, encoded_str)) != null);
-    comptime try expect((try ctregex.match(regex, .{ .encoding = encoding }, encoded_str)) != null);
+    try expect((try ctregex.match(regex, .{ .encoding = encoding }, &encoded_str)) != null);
+    comptime try expect((try ctregex.match(regex, .{ .encoding = encoding }, &encoded_str)) != null);
 }
 
 fn testSearchInner(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const encoding.CharT(), comptime found: []const encoding.CharT()) !void {
@@ -38,8 +48,7 @@ fn testSearch(comptime regex: []const u8, comptime encoding: ctregex.Encoding, c
     const encoded_str = comptime encodeStr(encoding, str);
     const encoded_found = comptime encodeStr(encoding, found);
 
-    try testSearchInner(regex, encoding, encoded_str, encoded_found);
-    comptime try testSearchInner(regex, encoding, encoded_str, encoded_found);
+    try testSearchInner(regex, encoding, &encoded_str, &encoded_found);
 }
 
 fn testCapturesInner(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const encoding.CharT(), comptime captures: []const ?[]const encoding.CharT()) !void {
@@ -63,12 +72,11 @@ fn testCapturesInner(comptime regex: []const u8, comptime encoding: ctregex.Enco
 fn testCaptures(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const u8, comptime captures: []const ?[]const u8) !void {
     const encoded_str = comptime encodeStr(encoding, str);
     comptime var encoded_captures: [captures.len]?[]const encoding.CharT() = undefined;
-    inline for (captures) |capt, idx| {
-        if (capt) |capt_slice| {
-            encoded_captures[idx] = comptime encodeStr(encoding, capt_slice);
-        } else {
-            encoded_captures[idx] = null;
-        }
+    inline for (&encoded_captures, captures) |*ecapt, capt| {
+        ecapt.* = if (capt) |capt_slice|
+            comptime encodeStr(encoding, capt_slice)
+        else
+            null;
     }
 
     try testCapturesInner(regex, encoding, encoded_str, &encoded_captures);
