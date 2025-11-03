@@ -79,7 +79,7 @@ fn testCaptures(comptime regex: []const u8, comptime encoding: ctregex.Encoding,
 }
 
 test "regex matching" {
-    @setEvalBranchQuota(2550);
+    @setEvalBranchQuota(3100);
     try testMatch("abc|def", .ascii, "abc");
     try testMatch("abc|def", .ascii, "def");
     try testMatch("[Α-Ω][α-ω]+", .utf8, "Αλεξανδρος");
@@ -95,7 +95,7 @@ test "regex matching" {
 }
 
 test "regex searching" {
-    @setEvalBranchQuota(3800);
+    @setEvalBranchQuota(2900);
     try testSearch("foo|bar", .ascii, "some very interesting test string including foobar.", "foo");
     try testSearch("(abc|αβγ)+", .utf8, "a lorem ipsum αβγαβγαβγ abcabc", "αβγαβγαβγ");
     try testSearch("(abc|αβγ)+", .utf16le, "a lorem ipsum αβγαβγαβγ abcabc", "αβγαβγαβγ");

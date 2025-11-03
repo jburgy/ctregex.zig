@@ -31,7 +31,6 @@ fn checkAscii(comptime codepoint: u21) usize {
 }
 
 fn charLenInEncoding(comptime codepoint: u21, comptime encoding: Encoding) usize {
-    @setEvalBranchQuota(4000);
     return switch (encoding) {
         .ascii => checkAscii(codepoint),
         .utf8 => std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable,
@@ -41,15 +40,12 @@ fn charLenInEncoding(comptime codepoint: u21, comptime encoding: Encoding) usize
 }
 
 fn ctLenInEncoding(comptime str: []const u21, comptime encoding: Encoding) usize {
-    @setEvalBranchQuota(10000);
     var len: usize = 0;
     for (str) |c| len += charLenInEncoding(c, encoding);
     return len;
 }
 
 fn ctEncode(comptime str: []const u21, comptime encoding: Encoding) [ctLenInEncoding(str, encoding)]encoding.CharT() {
-    @setEvalBranchQuota(20000);
-
     comptime var result: [ctLenInEncoding(str, encoding)]encoding.CharT() = undefined;
     var idx: usize = 0;
     for (str) |c| {
