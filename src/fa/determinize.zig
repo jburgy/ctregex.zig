@@ -1,8 +1,8 @@
 const std = @import("std");
-const FiniteAutomaton = @import("finite_automaton.zig");
+const FiniteAutomaton = @import("finite_automaton");
 const Transition = FiniteAutomaton.Transition;
 
-const ctutils = @import("../ct_utils.zig");
+const ctutils = @import("ct_utils");
 const CtSortedList = ctutils.CtSortedList;
 const CtArrayList = ctutils.CtArrayList;
 
@@ -11,12 +11,13 @@ fn newStateIndex(
     comptime new_states: *[]SortedList,
     comptime old_states: SortedList,
 ) usize {
-    for (new_states.*) |old, ns| {
+    for (new_states.*, 0..) |old, ns| {
         if (old.eql(old_states)) return ns;
     }
 
-    var buf: [new_states.len + 1]SortedList = ([1]SortedList{undefined} ** new_states.len) ++ [1]SortedList{old_states};
-    std.mem.copy(SortedList, &buf, new_states.*);
+    var buf: [new_states.len + 1]SortedList = undefined;
+    @memcpy(buf[0..new_states.len], new_states.*);
+    buf[new_states.len] = old_states;
     new_states.* = &buf;
     const new_state = new_states.len - 1;
 
@@ -40,7 +41,7 @@ fn appendFromSourcesFixSource(
     var inserted: usize = 0;
     const max_source = sources.items[sources.items.len - 1];
     var curr_source_idx: usize = 0;
-    for (transitions.items) |t, t_idx| {
+    for (transitions.items, 0..) |t, t_idx| {
         const curr_source = sources.items[curr_source_idx];
 
         if (t.source == curr_source) {
@@ -74,7 +75,7 @@ pub fn determinize(comptime self: FiniteAutomaton) FiniteAutomaton {
     const old_state_max = self.stateCount() - 1;
     comptime var new_states: []SortedList = blk: {
         var buf: [old_state_max + 1]SortedList = undefined;
-        for (buf) |*ns, i| ns.* = .{
+        for (&buf, 0..) |*ns, i| ns.* = .{
             .items = &.{i},
         };
         break :blk &buf;
@@ -171,7 +172,7 @@ pub fn determinize(comptime self: FiniteAutomaton) FiniteAutomaton {
 
     var final_states = SortedList{};
     for (self.final_states) |old_fs| {
-        for (new_states) |old_states, ns| {
+        for (new_states, 0..) |old_states, ns| {
             if (old_states.contains(old_fs))
                 final_states.append(ns);
         }
@@ -203,10 +204,10 @@ const Partition = struct {
     // with initialized memory
     fn init(comptime n: usize, comptime _: type) Partition {
         var self: Partition = undefined;
-        self.partition_count = @boolToInt(n != 0);
+        self.partition_count = @intFromBool(n != 0);
 
         var index_init: [n]usize = undefined;
-        for (index_init) |*e, i| e.* = i;
+        for (&index_init, 0..) |*e, i| e.* = i;
 
         self.elements = blk: {
             var buf = index_init;
@@ -428,7 +429,7 @@ fn minimize(
     blocks.split(marked_elements, &touched_sets);
 
     var cords = Partition.init(transitions.items.len, opaque {});
-    std.sort.sort(usize, cords.elements, transitions.items, cmp);
+    std.mem.sort(usize, cords.elements, transitions.items, cmp);
 
     marked_elements[0] = 0;
     cords.partition_count = 0;

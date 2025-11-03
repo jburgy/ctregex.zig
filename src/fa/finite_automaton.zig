@@ -2,9 +2,9 @@
 //! Starting state is implicitly '0' and we can grab the ending state from
 //!   as the maximum target of all transitions
 const std = @import("std");
-const Encoding = @import("../unicode.zig").Encoding;
-const ctUtf8EncodeChar = @import("../unicode.zig").ctUtf8EncodeChar;
-const ctutils = @import("../ct_utils.zig");
+const Encoding = @import("unicode").Encoding;
+const ctUtf8EncodeChar = @import("unicode").ctUtf8EncodeChar;
+const ctutils = @import("ct_utils");
 const CtArrayList = ctutils.CtArrayList;
 const CtSortedList = ctutils.CtSortedList;
 
@@ -68,7 +68,7 @@ pub fn concat(comptime lhs: Self, comptime rhs: Self) Self {
     // For every final state of lhs, we copy the transitions from rhs' start state
     // Also, if rhs' start state is also final we keep lhs' final states final instead of removing them
     // If the rhs start state is not reachable, we remove it
-    const rhs_final_state_offset = @boolToInt(remove_final_state);
+    const rhs_final_state_offset = @intFromBool(remove_final_state);
     var final_states: [
         rhs.final_states.len - rhs_final_state_offset +
             if (rhs_start_final) lhs.final_states.len else 0
@@ -77,9 +77,9 @@ pub fn concat(comptime lhs: Self, comptime rhs: Self) Self {
         // If both lhs and rhs final states are sorted, the result will be sorted
         final_states[0..lhs.final_states.len].* = lhs.final_states[0..].*;
 
-        for (final_states[lhs.final_states.len..][0 .. rhs.final_states.len - rhs_final_state_offset]) |*s, idx|
+        for (final_states[lhs.final_states.len..][0 .. rhs.final_states.len - rhs_final_state_offset], 0..) |*s, idx|
             s.* = rhs.final_states[idx + rhs_final_state_offset] + rhs_offset;
-    } else for (final_states[0 .. rhs.final_states.len - rhs_final_state_offset]) |*s, idx|
+    } else for (final_states[0 .. rhs.final_states.len - rhs_final_state_offset], 0..) |*s, idx|
         s.* = rhs.final_states[idx + rhs_final_state_offset] + rhs_offset;
 
     // If the rhs start state is not reachable, we remove its transitions from the rhs portion
@@ -102,7 +102,7 @@ pub fn concat(comptime lhs: Self, comptime rhs: Self) Self {
 
     // TODO: Interleave copies from original, then when in final state copy the new ones, then till next final state etc.
     //   This way we can avoid sorting here
-    std.sort.sort(
+    std.mem.sort(
         Transition,
         transitions[0..transition_idx],
         {},
@@ -110,7 +110,7 @@ pub fn concat(comptime lhs: Self, comptime rhs: Self) Self {
     );
 
     const rhs_transition_offset = if (rhs_start_reachable) 0 else rhs_start_transitions.len;
-    for (transitions[transition_idx..]) |*t, idx| {
+    for (transitions[transition_idx..], 0..) |*t, idx| {
         t.* = rhs.transitions[idx + rhs_transition_offset];
         t.source += rhs_offset;
         t.target += rhs_offset;
@@ -142,10 +142,10 @@ pub fn alt(comptime lhs: Self, comptime rhs: Self) Self {
 
     // If at least one of the start states is final, our new start state also needs to be
     const new_state_final = lhs_start_final or rhs_start_final;
-    const removed_final_states = @boolToInt(lhs_remove_final_state) + @boolToInt(rhs_remove_final_state);
+    const removed_final_states = @intFromBool(lhs_remove_final_state) + @intFromBool(rhs_remove_final_state);
     var final_states: [
         lhs.final_states.len + rhs.final_states.len - removed_final_states +
-            @boolToInt(new_state_final)
+            @intFromBool(new_state_final)
     ]usize = undefined;
 
     {
@@ -154,10 +154,10 @@ pub fn alt(comptime lhs: Self, comptime rhs: Self) Self {
             offset = 1;
             final_states[0] = 0;
         }
-        for (final_states[offset..lhs.final_states.len]) |*s, idx|
-            s.* = lhs.final_states[idx + @boolToInt(lhs_remove_final_state)] + lhs_offset;
-        for (final_states[offset..][lhs.final_states.len..]) |*s, idx|
-            s.* = rhs.final_states[idx + @boolToInt(rhs_remove_final_state)] + rhs_offset;
+        for (final_states[offset..lhs.final_states.len], 0..) |*s, idx|
+            s.* = lhs.final_states[idx + @intFromBool(lhs_remove_final_state)] + lhs_offset;
+        for (final_states[offset..][lhs.final_states.len..], 0..) |*s, idx|
+            s.* = rhs.final_states[idx + @intFromBool(rhs_remove_final_state)] + rhs_offset;
     }
 
     // We don't need to sort any section of transitions, we insert transitions from our new start state to lhs states
@@ -167,14 +167,14 @@ pub fn alt(comptime lhs: Self, comptime rhs: Self) Self {
     const copy_from_rhs_count = if (rhs_start_reachable) rhs.transitions.len else rhs.transitions.len - rhs_start_transitions.len;
     const copy_from_lhs_count = if (lhs_start_reachable) lhs.transitions.len else lhs.transitions.len - lhs_start_transitions.len;
     var transitions: [copy_from_lhs_count + copy_from_rhs_count + new_transition_count]Transition = undefined;
-    for (lhs_start_transitions) |t, idx| {
+    for (lhs_start_transitions, 0..) |t, idx| {
         transitions[idx] = .{
             .source = 0,
             .target = t.target + lhs_offset,
             .label = t.label,
         };
     }
-    for (rhs_start_transitions) |t, idx| {
+    for (rhs_start_transitions, 0..) |t, idx| {
         transitions[lhs_start_transitions.len + idx] = .{
             .source = 0,
             .target = t.target + rhs_offset,
@@ -186,13 +186,13 @@ pub fn alt(comptime lhs: Self, comptime rhs: Self) Self {
     const rhs_transition_offset = if (rhs_start_reachable) 0 else rhs_start_transitions.len;
 
     const old_transition_section = lhs_start_transitions.len + rhs_start_transitions.len;
-    for (transitions[old_transition_section..][0..copy_from_lhs_count]) |*t, idx| {
+    for (transitions[old_transition_section..][0..copy_from_lhs_count], 0..) |*t, idx| {
         t.* = lhs.transitions[idx + lhs_transition_offset];
         t.source += lhs_offset;
         t.target += lhs_offset;
     }
 
-    for (transitions[old_transition_section + copy_from_lhs_count ..]) |*t, idx| {
+    for (transitions[old_transition_section + copy_from_lhs_count ..], 0..) |*t, idx| {
         t.* = rhs.transitions[idx + rhs_transition_offset];
         t.source += rhs_offset;
         t.target += rhs_offset;
@@ -209,7 +209,7 @@ pub fn string(comptime s: []const Label) Self {
         .final_states = &.{s.len},
         .transitions = blk: {
             var res: [s.len]Transition = undefined;
-            for (res) |*t, idx| {
+            for (res, 0..) |*t, idx| {
                 t.* = .{
                     .source = idx,
                     .target = idx + 1,
@@ -239,10 +239,10 @@ pub fn opt(comptime self: Self) Self {
     // State offset
     const offset = if (start_reachable) 1 else 0;
 
-    const final_states_offset = @boolToInt(remove_final_state);
-    var final_states: [self.final_states.len + @boolToInt(!remove_final_state)]usize = undefined;
+    const final_states_offset = @intFromBool(remove_final_state);
+    var final_states: [self.final_states.len + @intFromBool(!remove_final_state)]usize = undefined;
     final_states[0] = 0;
-    for (final_states[1..]) |*s, idx| s.* = self.final_states[idx + final_states_offset] + offset;
+    for (final_states[1..], 0..) |*s, idx| s.* = self.final_states[idx + final_states_offset] + offset;
 
     const copy_from_self_count = if (start_reachable)
         self.transitions.len
@@ -250,14 +250,14 @@ pub fn opt(comptime self: Self) Self {
         self.transitions.len - start_transitions.len;
 
     var transitions: [copy_from_self_count + start_transitions.len]Transition = undefined;
-    for (transitions[0..start_transitions.len]) |*t, idx| {
+    for (transitions[0..start_transitions.len], 0..) |*t, idx| {
         t.* = start_transitions[idx];
         t.source = 0;
         t.target += offset;
     }
 
     const self_transition_offset = if (start_reachable) 0 else start_transitions.len;
-    for (transitions[start_transitions.len..]) |*t, idx| {
+    for (transitions[start_transitions.len..], 0..) |*t, idx| {
         t.* = self.transitions[idx + self_transition_offset];
         t.source += offset;
         t.target += offset;
@@ -284,12 +284,12 @@ fn starOrPlus(comptime self: Self, comptime kind: enum { star, plus }) Self {
         .plus => false,
     };
 
-    const final_states_offset = @boolToInt(remove_final_state);
-    var final_states: [self.final_states.len - final_states_offset + @boolToInt(new_state_final)]usize = undefined;
+    const final_states_offset = @intFromBool(remove_final_state);
+    var final_states: [self.final_states.len - final_states_offset + @intFromBool(new_state_final)]usize = undefined;
     if (new_state_final) {
         final_states[0] = 0;
     }
-    for (final_states[@boolToInt(new_state_final)..]) |*s, idx| s.* = self.final_states[idx + final_states_offset] + offset;
+    for (final_states[@intFromBool(new_state_final)..], 0..) |*s, idx| s.* = self.final_states[idx + final_states_offset] + offset;
 
     const new_transition_count = start_transitions.len * (self.final_states.len + 1);
     const copy_from_self_count = if (start_reachable)
@@ -299,7 +299,7 @@ fn starOrPlus(comptime self: Self, comptime kind: enum { star, plus }) Self {
 
     var transitions: [copy_from_self_count + new_transition_count]Transition = undefined;
     // Transitions from new start state
-    for (transitions[0..start_transitions.len]) |*t, idx| {
+    for (transitions[0..start_transitions.len], 0..) |*t, idx| {
         t.* = start_transitions[idx];
         t.source = 0;
         t.target += offset;
@@ -307,7 +307,7 @@ fn starOrPlus(comptime self: Self, comptime kind: enum { star, plus }) Self {
 
     // Rest of old transitions, minus the ones from start if we removed them
     const self_transition_offset = if (start_reachable) 0 else start_transitions.len;
-    for (transitions[start_transitions.len..][0..copy_from_self_count]) |*t, idx| {
+    for (transitions[start_transitions.len..][0..copy_from_self_count], 0..) |*t, idx| {
         t.* = self.transitions[idx + self_transition_offset];
         t.source += offset;
         t.target += offset;
@@ -316,7 +316,7 @@ fn starOrPlus(comptime self: Self, comptime kind: enum { star, plus }) Self {
     var transition_idx = start_transitions.len + copy_from_self_count;
     // For each new final state (except state 0 if it is final, which has been handled already)
     //   copy the old start transitions with fixed source and targets
-    for (final_states[@boolToInt(new_state_final)..]) |s| {
+    for (final_states[@intFromBool(new_state_final)..]) |s| {
         for (start_transitions) |t| {
             transitions[transition_idx] = .{
                 .source = s,
@@ -328,7 +328,7 @@ fn starOrPlus(comptime self: Self, comptime kind: enum { star, plus }) Self {
     }
 
     // TODO: Rewrite in a way we don't need to sort, should be very similar to concat()
-    std.sort.sort(
+    std.mem.sort(
         Transition,
         transitions[start_transitions.len + self.transitions.len ..],
         {},
@@ -375,10 +375,10 @@ pub fn singleCharBoundInEncoding(
 pub fn isDfa(comptime self: Self) bool {
     var start: usize = 0;
     var state = 0;
-    for (self.transitions) |t, i| {
+    for (self.transitions, 0..) |t, i| {
         if (t.source != state) {
             const state_transitions = self.transitions[start..i];
-            for (state_transitions) |t1, j| {
+            for (state_transitions, 0..) |t1, j| {
                 var idx = j + 1;
                 while (idx < state_transitions.len) : (idx += 1) {
                     if (t1.label == state_transitions[idx].label) return false;

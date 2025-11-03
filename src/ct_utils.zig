@@ -68,7 +68,7 @@ pub fn CtArrayList(comptime T: type) type {
 
         pub fn fromSlice(comptime s: []const T) @This() {
             var buf: [s.len]T = undefined;
-            mem.copy(T, &buf, s);
+            @memcpy(&buf, s);
             return .{
                 .items = &buf,
                 .capacity = buf.len,
@@ -120,7 +120,7 @@ pub fn CtArrayList(comptime T: type) type {
 
             // TODO: This crashes the compiler so we still use the loop :/
             // self.items[i..new_len].* =  self.items[i + 1 ..].*;
-            for (self.items[i..new_len]) |*b, j| b.* = self.items[i + 1 + j];
+            for (self.items[i..new_len], 0..) |*b, j| b.* = self.items[i + 1 + j];
             self.items[new_len] = undefined;
             self.items.len = new_len;
         }

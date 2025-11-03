@@ -1,8 +1,8 @@
 const std = @import("std");
 
 const root = @import("../ctregex.zig");
-const unicode = @import("../unicode.zig");
-const FiniteAutomaton = @import("../fa/finite_automaton.zig");
+const unicode = @import("unicode");
+const FiniteAutomaton = @import("finite_automaton");
 
 const Operation = root.Operation;
 const NextChar = root.NextChar;
@@ -29,12 +29,7 @@ inline fn nextChar(
             defer input_idx.* += length;
             if (length == 1) return input[input_idx.*];
             if (input_idx.* + length > input.len) return error.DecodeError;
-            return switch (length) {
-                2 => std.unicode.utf8Decode2(input[input_idx.*..][0..2]) catch return error.DecodeError,
-                3 => std.unicode.utf8Decode3(input[input_idx.*..][0..3]) catch return error.DecodeError,
-                4 => std.unicode.utf8Decode4(input[input_idx.*..][0..4]) catch return error.DecodeError,
-                else => unreachable,
-            };
+            return std.unicode.utf8Decode(input[input_idx.*..][0..length]) catch return error.DecodeError;
         },
         .utf16le => {
             const length = unicode.utf16leCharSequenceLength(input[input_idx.*]) catch return error.DecodeError;
@@ -128,14 +123,14 @@ inline fn readNextChar(
     comptime Reader: type,
     reader: Reader,
 ) NextChar(encoding, single_char, error{EndOfStream} || Reader.Error) {
-    if (single_char)
+    return if (single_char)
         switch (encoding) {
-            .ascii, .utf8 => return try reader.readByte(),
-            .utf16le => return try reader.readIntLittle(u16),
-            .codepoint => return @truncate(u21, try reader.readIntNative(u32)),
+            .ascii, .utf8 => try reader.readByte(),
+            .utf16le => try reader.readIntLittle(u16),
+            .codepoint => @truncate(try reader.readIntNative(u32)),
         }
     else
-        return try encoding.readCodepoint(reader);
+        try encoding.readCodepoint(reader);
 }
 
 pub inline fn matchReader(
@@ -179,7 +174,7 @@ pub inline fn matchReader(
             } else if (err == error.DecodeError) {
                 return decode_err_value;
             } else if (@TypeOf(reader).Error != error{}) {
-                return @errSetCast(@TypeOf(reader).Error, err);
+                return @as(@TypeOf(reader).Error, @errorCast(err));
             }
             unreachable;
         };

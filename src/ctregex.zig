@@ -1,8 +1,8 @@
 const std = @import("std");
 const dfa = @import("engines/dfa.zig");
-const unicode = @import("unicode.zig");
+const unicode = @import("unicode");
 const LL = @import("ll.zig");
-const FiniteAutomaton = @import("fa/finite_automaton.zig");
+const FiniteAutomaton = @import("finite_automaton");
 const determinize = @import("fa/determinize.zig").determinize;
 
 const ctUtf8EncodeChar = unicode.ctUtf8EncodeChar;
@@ -141,23 +141,23 @@ const InputKind = enum {
 
 fn inputKind(comptime encoding: Encoding, comptime Input: type) InputKind {
     const type_info = @typeInfo(Input);
-    if (type_info != .Pointer) return .reader;
+    if (type_info != .pointer) return .reader;
 
     const Char = encoding.CharT();
-    const child = type_info.Pointer.child;
+    const child = type_info.pointer.child;
     const zero_terminated = if (std.meta.sentinel(Input)) |s| s == 0 else false;
 
-    switch (type_info.Pointer.size) {
-        .Slice => if (child != Char) {
+    switch (type_info.pointer.size) {
+        .slice => if (child != Char) {
             if (child == u8) return .byte_slice;
 
             @compileError("Expected input of type []const " ++ @typeName(Char) ++ ", got " ++
                 @typeName(Input));
         } else return if (zero_terminated) .char_slice_zero_term else .char_slice,
-        .One => {
+        .one => {
             const child_type_info = @typeInfo(child);
             return switch (child_type_info) {
-                .Array => |arr| {
+                .array => |arr| {
                     const child_zero_terminated = if (std.meta.sentinel(child)) |s| s == 0 else false;
                     if (arr.child != Char) {
                         if (arr.child == u8) return .byte_slice;
@@ -328,7 +328,7 @@ pub fn startsWith(
 
 test "DFA match" {
     @setEvalBranchQuota(2_300);
-    comptime {
+    {
         var fbs = std.io.fixedBufferStream("abdefé");
         try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", fbs.reader()));
         //std.debug.assert(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
