@@ -1,6 +1,9 @@
 # Zig compile time regular expressions
 Generating fast code since 2020
 
+I learned in November 2025 that Alex Naskos, the original maintainer of `ctregex.zig` passed away in September 2023.
+He left an incomplete `rewrite` branch behind which I would like to push ahead to honor his memory.
+
 ## Features
 - Comptime regular expression compilation
 - Comptime and runtime matching
