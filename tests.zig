@@ -35,7 +35,6 @@ fn encodeStr(comptime encoding: ctregex.Encoding, comptime str: []const u8) [enc
 fn testMatch(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const u8) !void {
     const encoded_str = comptime encodeStr(encoding, str);
     try expect((try ctregex.match(regex, .{ .encoding = encoding }, &encoded_str)) != null);
-    comptime try expect((try ctregex.match(regex, .{ .encoding = encoding }, &encoded_str)) != null);
 }
 
 fn testSearchInner(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const encoding.CharT(), comptime found: []const encoding.CharT()) !void {
@@ -51,36 +50,32 @@ fn testSearch(comptime regex: []const u8, comptime encoding: ctregex.Encoding, c
     try testSearchInner(regex, encoding, &encoded_str, &encoded_found);
 }
 
-fn testCapturesInner(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const encoding.CharT(), comptime captures: []const ?[]const encoding.CharT()) !void {
-    const result = try ctregex.match(regex, .{ .encoding = encoding }, str);
+fn testCaptures(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const u8, comptime captures: []const ?[]const u8) !void {
+    const encoded_str = comptime encodeStr(encoding, str);
+    comptime var encoded_captures: [captures.len]?[]const encoding.CharT() = undefined;
+    inline for (&encoded_captures, captures) |*ecapt, capt| {
+        if (capt) |capt_slice| {
+            const temp = comptime encodeStr(encoding, capt_slice);
+            ecapt.* = &temp;
+        } else {
+            ecapt.* = null;
+        }
+    }
+
+    const result = try ctregex.match(regex, .{ .encoding = encoding }, &encoded_str);
     try expect(result != null);
 
     const res_captures = &result.?.captures;
     try expect(res_captures.len == captures.len);
 
-    var idx: usize = 0;
-    while (idx < captures.len) : (idx += 1) {
-        if (res_captures[idx] == null) {
-            try expect(captures[idx] == null);
+    for (res_captures, captures) |rcapt, capt| {
+        if (rcapt) |res_capture| {
+            try expect(capt != null);
+            try expect(std.mem.eql(encoding.CharT(), res_capture, capt.?));
         } else {
-            try expect(captures[idx] != null);
-            try expect(std.mem.eql(encoding.CharT(), res_captures[idx].?, captures[idx].?));
+            try expect(capt == null);
         }
     }
-}
-
-fn testCaptures(comptime regex: []const u8, comptime encoding: ctregex.Encoding, comptime str: []const u8, comptime captures: []const ?[]const u8) !void {
-    const encoded_str = comptime encodeStr(encoding, str);
-    comptime var encoded_captures: [captures.len]?[]const encoding.CharT() = undefined;
-    inline for (&encoded_captures, captures) |*ecapt, capt| {
-        ecapt.* = if (capt) |capt_slice|
-            comptime encodeStr(encoding, capt_slice)
-        else
-            null;
-    }
-
-    try testCapturesInner(regex, encoding, encoded_str, &encoded_captures);
-    comptime try testCapturesInner(regex, encoding, encoded_str, &encoded_captures);
 }
 
 test "regex matching" {

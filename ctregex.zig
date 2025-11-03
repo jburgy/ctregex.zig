@@ -25,20 +25,19 @@ fn utf16leDecode(chars: []const u16) !u21 {
     }
 }
 
-fn checkAscii(comptime codepoint: u21) void {
+fn checkAscii(comptime codepoint: u21) usize {
     if (codepoint > 127) @compileError("Cannot match character '" ++ std.unicode.utf8EncodeComptime(codepoint) ++ "' in ascii mode.");
+    return 1;
 }
 
 fn charLenInEncoding(comptime codepoint: u21, comptime encoding: Encoding) usize {
-    switch (encoding) {
-        .ascii => {
-            checkAscii(codepoint);
-            return 1;
-        },
-        .utf8 => return std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable,
-        .utf16le => return if (codepoint < 0x10000) 1 else 2,
-        .codepoint => return 1,
-    }
+    @setEvalBranchQuota(4000);
+    return switch (encoding) {
+        .ascii => checkAscii(codepoint),
+        .utf8 => std.unicode.utf8CodepointSequenceLength(codepoint) catch unreachable,
+        .utf16le => if (codepoint < 0x10000) 1 else 2,
+        .codepoint => 1,
+    };
 }
 
 fn ctLenInEncoding(comptime str: []const u21, comptime encoding: Encoding) usize {
@@ -752,8 +751,8 @@ inline fn matchAtom(comptime atom: RegexParser.Atom, comptime options: MatchOpti
                     },
                     .range => |range| {
                         if (options.encoding == .ascii) {
-                            checkAscii(range.start);
-                            checkAscii(range.end);
+                            _ = checkAscii(range.start);
+                            _ = checkAscii(range.end);
                         }
 
                         if (this_cp >= range.start and this_cp <= range.end)
