@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const root = @import("../ctregex.zig");
 const unicode = @import("unicode");
@@ -120,14 +121,13 @@ pub inline fn matchSlice(
 inline fn readNextChar(
     comptime encoding: Encoding,
     comptime single_char: bool,
-    comptime Reader: type,
-    reader: Reader,
-) NextChar(encoding, single_char, error{EndOfStream} || Reader.Error) {
+    reader: *std.io.Reader,
+) NextChar(encoding, single_char, std.io.Reader.Error) {
     return if (single_char)
         switch (encoding) {
-            .ascii, .utf8 => try reader.readByte(),
-            .utf16le => try reader.readIntLittle(u16),
-            .codepoint => @truncate(try reader.readIntNative(u32)),
+            .ascii, .utf8 => try reader.takeByte(),
+            .utf16le => try reader.takeInt(u16, .little),
+            .codepoint => @truncate(try reader.takeInt(u32, builtin.cpu.arch.endian())),
         }
     else
         try encoding.readCodepoint(reader);
@@ -138,7 +138,7 @@ pub inline fn matchReader(
     comptime automaton: FiniteAutomaton,
     comptime operation: Operation,
     comptime single_char: bool,
-    reader: anytype,
+    reader: *std.io.Reader,
 ) MatchError(
     options.encoding,
     options.decodeErrorMode,
@@ -160,7 +160,6 @@ pub inline fn matchReader(
         const char = readNextChar(
             options.encoding,
             single_char,
-            @TypeOf(reader),
             reader,
         ) catch |err| {
             // We use if-else here and not switch because the error set depends on options
@@ -173,10 +172,9 @@ pub inline fn matchReader(
                 return false;
             } else if (err == error.DecodeError) {
                 return decode_err_value;
-            } else if (@TypeOf(reader).Error != error{}) {
-                return @as(@TypeOf(reader).Error, @errorCast(err));
+            } else {
+                return @as(std.io.Reader.Error, @errorCast(err));
             }
-            unreachable;
         };
 
         inline for (automaton.transitions) |t| {

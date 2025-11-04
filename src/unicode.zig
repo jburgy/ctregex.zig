@@ -1,4 +1,5 @@
 const std = @import("std");
+const unicode = std.unicode;
 
 // @TODO Utf32le?
 pub const Encoding = enum {
@@ -22,8 +23,8 @@ pub const Encoding = enum {
         };
     }
 
-    inline fn utf8DoNextByte(reader: anytype, value: *u21) (@TypeOf(reader).Error || error{DecodeError})!void {
-        const c = reader.readByte() catch |err| switch (err) {
+    inline fn utf8DoNextByte(reader: *std.io.Reader, value: *u21) (std.io.Reader.Error || error{DecodeError})!void {
+        const c = reader.takeByte() catch |err| switch (err) {
             error.EndOfStream => return error.DecodeError,
             else => |e| return e,
         };
@@ -34,13 +35,13 @@ pub const Encoding = enum {
 
     pub inline fn readCodepointWithFirstChar(
         comptime encoding: Encoding,
-        reader: anytype,
+        reader: *std.io.Reader,
         c: encoding.CharT(),
     ) !u21 {
         switch (encoding) {
             .ascii => return c,
             .utf8 => {
-                const length = std.unicode.utf8CodepointSequenceLength(c) catch return error.DecodeError;
+                const length = unicode.utf8CodepointSequenceLength(c) catch return error.DecodeError;
                 switch (length) {
                     1 => return c,
                     2 => {
@@ -74,16 +75,20 @@ pub const Encoding = enum {
             },
             .utf16le => {
                 const c0: u21 = c;
-                if (c0 & ~@as(u21, 0x03ff) == 0xd800) {
-                    const c1: u21 = reader.readIntLittle(u16) catch |err| switch (err) {
+                if (unicode.utf16IsHighSurrogate(c0)) {
+                    const c1: u21 = reader.takeInt(u16, .little) catch |err| switch (err) {
                         error.EndOfStream => return error.DecodeError,
                         else => |e| return e,
                     };
-                    if (c1 & ~@as(u21, 0x03ff) != 0xdc00) return error.DecodeError;
-                    return 0x10000 + (((c0 & 0x03ff) << 10) | (c1 & 0x03ff));
-                } else if (c0 & ~@as(u21, 0x03ff) == 0xdc00)
+                    return unicode.utf16DecodeSurrogatePair(&.{ c0, c1 }) catch |err| switch (err) {
+                        error.ExpectedSecondSurrogateHalf => error.DecodeError,
+                        else => |e| e,
+                    };
+                } else if (unicode.utf16IsLowSurrogate(c0)) {
                     return error.DecodeError;
-                return c0;
+                } else {
+                    return c0;
+                }
             },
             .codepoint => return c,
         }
@@ -91,16 +96,16 @@ pub const Encoding = enum {
 
     pub inline fn readCodepoint(
         comptime encoding: Encoding,
-        reader: anytype,
+        reader: *std.io.Reader,
     ) !u21 {
         switch (encoding) {
             .ascii, .codepoint => unreachable,
             .utf8 => {
-                const c0 = try reader.readByte();
+                const c0 = try reader.takeByte();
                 return try encoding.readCodepointWithFirstChar(reader, c0);
             },
             .utf16le => {
-                const c0 = try reader.readIntLittle(u16);
+                const c0 = try reader.takeInt(u16, .little);
                 return try encoding.readCodepointWithFirstChar(reader, c0);
             },
         }
@@ -108,29 +113,23 @@ pub const Encoding = enum {
 };
 
 pub fn utf16leCharSequenceLength(first_char: u16) !u2 {
-    const c0: u21 = first_char;
-    if (first_char & ~@as(u21, 0x03ff) == 0xd800) {
+    if (unicode.utf16IsHighSurrogate(first_char)) {
         return 2;
-    } else if (c0 & ~@as(u21, 0x03ff) == 0xdc00) {
+    } else if (unicode.utf16IsLowSurrogate(first_char)) {
         return error.UnexpectedSecondSurrogateHalf;
     }
     return 1;
 }
 
-pub fn utf16leDecode(chars: []const u16) !u21 {
-    const c0: u21 = chars[0];
-    if (c0 & ~@as(u21, 0x03ff) == 0xd800) {
-        const c1: u21 = chars[1];
-        if (c1 & ~@as(u21, 0x03ff) != 0xdc00) return error.ExpectedSecondSurrogateHalf;
-        return 0x10000 + (((c0 & 0x03ff) << 10) | (c1 & 0x03ff));
-    } else if (c0 & ~@as(u21, 0x03ff) == 0xdc00) {
-        return error.UnexpectedSecondSurrogateHalf;
-    } else {
-        return c0;
-    }
+pub fn utf16leDecode(code_units: []const u16) !u21 {
+    return if (unicode.utf16IsHighSurrogate(code_units[0]))
+        try unicode.utf16DecodeSurrogatePair(&code_units)
+    else if (unicode.utf16IsLowSurrogate(code_units[0]))
+        error.UnexpectedSecondSurrogateHalf
+    else
+        code_units[0];
 }
 
 pub fn ctUtf8EncodeChar(comptime codepoint: u21) []const u8 {
-    var buf: [4]u8 = undefined;
-    return buf[0 .. std.unicode.utf8Encode(codepoint, &buf) catch unreachable];
+    return unicode.utf8EncodeComptime(codepoint)[0..];
 }

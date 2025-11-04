@@ -294,9 +294,18 @@ const Partition = struct {
     }
 };
 
-fn cmp(transitions: []const Transition, i: usize, j: usize) bool {
-    return transitions[i].label < transitions[j].label;
-}
+const SortContext = struct {
+    items: []usize,
+    transitions: []const Transition,
+
+    pub fn lessThan(ctx: @This(), a: usize, b: usize) bool {
+        return ctx.transitions[ctx.items[a]].label < ctx.transitions[ctx.items[b]].label;
+    }
+
+    pub fn swap(ctx: @This(), a: usize, b: usize) void {
+        return std.mem.swap(usize, &ctx.items[a], &ctx.items[b]);
+    }
+};
 
 fn makeAdjacent(
     transitions: []const Transition,
@@ -429,7 +438,10 @@ fn minimize(
     blocks.split(marked_elements, &touched_sets);
 
     var cords = Partition.init(transitions.items.len, opaque {});
-    std.mem.sort(usize, cords.elements, transitions.items, cmp);
+    std.mem.sortUnstableContext(0, transitions.items.len, SortContext{
+        .items = cords.elements,
+        .transitions = transitions.items,
+    });
 
     marked_elements[0] = 0;
     cords.partition_count = 0;

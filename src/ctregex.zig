@@ -140,8 +140,8 @@ const InputKind = enum {
 };
 
 fn inputKind(comptime encoding: Encoding, comptime Input: type) InputKind {
+    if (Input == *std.io.Reader) return .reader;
     const type_info = @typeInfo(Input);
-    if (type_info != .pointer) return .reader;
 
     const Char = encoding.CharT();
     const child = type_info.pointer.child;
@@ -199,7 +199,7 @@ pub fn MatchError(
     comptime Input: type,
 ) type {
     var error_set = switch (inputKind(encoding, Input)) {
-        .reader => Input.Error,
+        .reader => std.io.Reader.Error,
         else => error{},
     };
 
@@ -284,7 +284,7 @@ inline fn matchInner(
             automaton,
             operation,
             single_char,
-            input,
+            @as(*std.io.Reader, input),
         ),
         .char_slice, .char_slice_zero_term => return try engine.matchSlice(
             options,
@@ -298,13 +298,13 @@ inline fn matchInner(
                 @as([]const Char, input),
         ),
         .byte_slice => {
-            var fbs = std.io.fixedBufferStream(@as([]const u8, input));
+            var reader: std.io.Reader = .fixed(@as([]const u8, input));
             return try engine.matchReader(
                 options,
                 automaton,
                 operation,
                 single_char,
-                fbs.reader(),
+                &reader,
             );
         },
     }
@@ -329,8 +329,8 @@ pub fn startsWith(
 test "DFA match" {
     @setEvalBranchQuota(2_300);
     {
-        var fbs = std.io.fixedBufferStream("abdefé");
-        try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", fbs.reader()));
+        var reader: std.io.Reader = .fixed("abdefé");
+        try std.testing.expect(try match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", &reader));
         //std.debug.assert(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
     }
 
