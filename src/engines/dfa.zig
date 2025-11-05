@@ -47,11 +47,7 @@ pub inline fn matchSlice(
     comptime automaton: FiniteAutomaton,
     comptime operation: Operation,
     comptime single_char: bool,
-    comptime zero_term: bool,
-    input: if (zero_term)
-        [:0]const options.encoding.CharT()
-    else
-        []const options.encoding.CharT(),
+    input: []const options.encoding.CharT(),
 ) MatchError(
     options.encoding,
     options.decodeErrorMode,
@@ -64,7 +60,7 @@ pub inline fn matchSlice(
 
     var state: std.math.IntFittingRange(0, automaton.stateCount() - 1) = 0;
     var input_idx: usize = 0;
-    matching: while (zero_term and input_idx < input.len) {
+    matching: while (input_idx < input.len) {
         switch (operation) {
             .match => {},
             .starts_with => {
@@ -80,9 +76,6 @@ pub inline fn matchSlice(
             input,
             &input_idx,
         ) catch return decode_err_value;
-
-        if (zero_term and char == 0)
-            break;
 
         inline for (automaton.transitions) |t| {
             if (t.source == state and t.label == char) {

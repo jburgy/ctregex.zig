@@ -252,8 +252,6 @@ inline fn matchInner(
     comptime operation: Operation,
     input: anytype,
 ) MatchResult(options, &pattern, @TypeOf(input)) {
-    const Char = options.encoding.CharT();
-
     // TODO NFA engine and auto detection
     const automaton = switch (options.engine) {
         .auto => comptime cachedAutoFA(N, pattern),
@@ -291,11 +289,10 @@ inline fn matchInner(
             automaton,
             operation,
             single_char,
-            input_kind == .char_slice_zero_term,
             if (input_kind == .char_slice_zero_term)
-                @as([:0]const Char, input)
+                std.mem.sliceTo(input, 0)
             else
-                @as([]const Char, input),
+                input,
         ),
         .byte_slice => {
             var reader: std.io.Reader = .fixed(@as([]const u8, input));
@@ -331,13 +328,15 @@ test "DFA match" {
     {
         var reader: std.io.Reader = .fixed("abdefé");
         try std.testing.expect(try match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", &reader));
-        //std.debug.assert(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
     }
 
-    //var fbs = std.io.fixedBufferStream("abdefé");
-    //try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", fbs.reader()));
-    std.debug.assert(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
+    try std.testing.expect(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}
+
 // TODO Reorganize files, only keep public interface in this file
 //   Flesh out structure of things, add `std.debug.todo`s
 // TODO Lots and lots of docs
