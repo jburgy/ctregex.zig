@@ -3,7 +3,7 @@
 //!   as the maximum target of all transitions
 const std = @import("std");
 const Encoding = @import("unicode").Encoding;
-const ctUtf8EncodeChar = @import("unicode").ctUtf8EncodeChar;
+const ctUtf8EncodeChar = std.unicode.utf8EncodeComptime;
 const ctutils = @import("ct_utils");
 const CtArrayList = ctutils.CtArrayList;
 const CtSortedList = ctutils.CtSortedList;

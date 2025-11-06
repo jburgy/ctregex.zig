@@ -5,7 +5,7 @@ const LL = @import("ll.zig");
 const FiniteAutomaton = @import("finite_automaton");
 const determinize = @import("fa/determinize.zig").determinize;
 
-const ctUtf8EncodeChar = unicode.ctUtf8EncodeChar;
+const ctUtf8EncodeChar = std.unicode.utf8EncodeComptime;
 pub const Encoding = unicode.Encoding;
 
 // TODO Gradually add PCRE features, mention what we support in readme
@@ -323,13 +323,21 @@ pub fn startsWith(
     return matchInner(options, pattern.len, pattern[0..].*, .starts_with, input);
 }
 
-test "DFA match" {
-    @setEvalBranchQuota(2_300);
+test match {
+    @setEvalBranchQuota(2_100);
     {
         var reader: std.io.Reader = .fixed("abdefé");
         try std.testing.expect(try match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", &reader));
     }
+    try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", "abdefé"));
+}
 
+test startsWith {
+    @setEvalBranchQuota(2_100);
+    {
+        var reader: std.io.Reader = .fixed("abdeffffffffé😊yoyo");
+        try std.testing.expect(try startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", &reader));
+    }
     try std.testing.expect(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
 }
 

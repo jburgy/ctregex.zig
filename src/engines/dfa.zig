@@ -33,7 +33,7 @@ inline fn nextChar(
             return std.unicode.utf8Decode(input[input_idx.*..][0..length]) catch return error.DecodeError;
         },
         .utf16le => {
-            const length = unicode.utf16leCharSequenceLength(input[input_idx.*]) catch return error.DecodeError;
+            const length = std.unicode.utf16CodeUnitSequenceLength(input[input_idx.*]) catch return error.DecodeError;
             defer input_idx.* += length;
             if (length == 1) return input[input_idx.*];
             if (input_idx.* + 2 > input.len) return error.DecodeError;
@@ -91,7 +91,7 @@ pub inline fn matchSlice(
             const length = switch (options.encoding) {
                 .ascii, .codepoint => unreachable,
                 .utf8 => std.unicode.utf8ByteSequenceLength(last_char) catch return error.DecodeError,
-                .utf16le => unicode.utf16leDecode(last_char) catch return error.DecodeError,
+                .utf16le => std.unicode.utf16CodeUnitSequenceLength(last_char) catch return error.DecodeError,
             };
             if (input_idx - 1 + length > input.len) return error.DecodeError;
             // We need the checks from the decoding functions too here

@@ -28,9 +28,9 @@ pub const Encoding = enum {
             error.EndOfStream => return error.DecodeError,
             else => |e| return e,
         };
-        if (c & 0b11000000 != 0b10000000) return error.DecodeError;
+        if (c & 0b1100_0000 != 0b100_00000) return error.DecodeError;
         value.* <<= 6;
-        value.* |= c & 0b00111111;
+        value.* |= c & 0b0011_1111;
     }
 
     pub inline fn readCodepointWithFirstChar(
@@ -41,19 +41,19 @@ pub const Encoding = enum {
         switch (encoding) {
             .ascii => return c,
             .utf8 => {
-                const length = unicode.utf8CodepointSequenceLength(c) catch return error.DecodeError;
+                const length = unicode.utf8ByteSequenceLength(c) catch return error.DecodeError;
                 switch (length) {
                     1 => return c,
                     2 => {
                         const c0: u21 = c;
-                        var value: u21 = c0 & 0b00011111;
+                        var value: u21 = c0 & 0b0001_1111;
                         try utf8DoNextByte(reader, &value);
                         if (value < 0x80) return error.DecodeError;
                         return value;
                     },
                     3 => {
                         const c0: u21 = c;
-                        var value: u21 = c0 & 0b00001111;
+                        var value: u21 = c0 & 0b0000_1111;
                         try utf8DoNextByte(reader, &value);
                         try utf8DoNextByte(reader, &value);
                         if (value < 0x800 or (0xd800 <= value and value <= 0xdfff))
@@ -62,12 +62,12 @@ pub const Encoding = enum {
                     },
                     4 => {
                         const c0: u21 = c;
-                        var value: u21 = c0 & 0b00000111;
+                        var value: u21 = c0 & 0b0000_0111;
                         try utf8DoNextByte(reader, &value);
                         try utf8DoNextByte(reader, &value);
                         try utf8DoNextByte(reader, &value);
 
-                        if (value < 0x10000 or value > 0x10FFFF) return error.DecodeError;
+                        if (value < 0x1_0000 or value > 0x10_FFFF) return error.DecodeError;
                         return value;
                     },
                     else => unreachable,
@@ -112,15 +112,6 @@ pub const Encoding = enum {
     }
 };
 
-pub fn utf16leCharSequenceLength(first_char: u16) !u2 {
-    if (unicode.utf16IsHighSurrogate(first_char)) {
-        return 2;
-    } else if (unicode.utf16IsLowSurrogate(first_char)) {
-        return error.UnexpectedSecondSurrogateHalf;
-    }
-    return 1;
-}
-
 pub fn utf16leDecode(code_units: []const u16) !u21 {
     return if (unicode.utf16IsHighSurrogate(code_units[0]))
         try unicode.utf16DecodeSurrogatePair(&code_units)
@@ -128,8 +119,4 @@ pub fn utf16leDecode(code_units: []const u16) !u21 {
         error.UnexpectedSecondSurrogateHalf
     else
         code_units[0];
-}
-
-pub fn ctUtf8EncodeChar(comptime codepoint: u21) []const u8 {
-    return unicode.utf8EncodeComptime(codepoint)[0..];
 }
