@@ -118,34 +118,22 @@ const PcreGrammar = struct {
     }
 };
 
-// Return type of nextChar.* engine functions
-pub fn NextChar(
-    comptime encoding: Encoding,
-    comptime single_char: bool,
-    comptime additional_errors: type,
-) type {
-    return if (single_char)
-        additional_errors!encoding.CharT()
-    else switch (encoding) {
-        .ascii, .codepoint => additional_errors!encoding.CharT(),
-        .utf8, .utf16le => (error{DecodeError} || additional_errors)!u21,
-    };
-}
-
-const InputKind = enum {
+pub const InputKind = enum {
     reader,
     char_slice_zero_term,
     char_slice,
     byte_slice,
 };
 
+fn isZeroTerminated(comptime Input: type) bool {
+    return if (std.meta.sentinel(Input)) |s| s == 0 else false;
+}
+
 fn inputKind(comptime encoding: Encoding, comptime Input: type) InputKind {
-    if (Input == *std.io.Reader) return .reader;
     const type_info = @typeInfo(Input);
 
     const Char = encoding.CharT();
     const child = type_info.pointer.child;
-    const zero_terminated = if (std.meta.sentinel(Input)) |s| s == 0 else false;
 
     switch (type_info.pointer.size) {
         .slice => if (child != Char) {
@@ -153,18 +141,17 @@ fn inputKind(comptime encoding: Encoding, comptime Input: type) InputKind {
 
             @compileError("Expected input of type []const " ++ @typeName(Char) ++ ", got " ++
                 @typeName(Input));
-        } else return if (zero_terminated) .char_slice_zero_term else .char_slice,
+        } else return if (isZeroTerminated(Input)) .char_slice_zero_term else .char_slice,
         .one => {
             const child_type_info = @typeInfo(child);
             return switch (child_type_info) {
                 .array => |arr| {
-                    const child_zero_terminated = if (std.meta.sentinel(child)) |s| s == 0 else false;
                     if (arr.child != Char) {
                         if (arr.child == u8) return .byte_slice;
 
                         @compileError("Expected input of type *const [N]" ++ @typeName(Char) ++
                             ", got " ++ @typeName(Input));
-                    } else return if (child_zero_terminated) .char_slice_zero_term else .char_slice;
+                    } else return if (isZeroTerminated(child)) .char_slice_zero_term else .char_slice;
                 },
                 else => .reader,
             };
@@ -196,17 +183,19 @@ fn cachedDFA(comptime N: usize, comptime pattern: [N:0]u8) FiniteAutomaton {
 pub fn MatchError(
     comptime encoding: Encoding,
     comptime decodeErrorMode: DecodeErrorMode,
-    comptime Input: type,
+    comptime input_kind: InputKind,
 ) type {
-    var error_set = switch (inputKind(encoding, Input)) {
-        .reader => std.io.Reader.Error,
-        else => error{},
-    };
+    const decode_error = if (decodeErrorMode == .@"error" and encoding.needsDecoding())
+        error{DecodeError}
+    else
+        error{};
 
-    if (decodeErrorMode == .@"error" and encoding.needsDecoding()) {
-        error_set = error{DecodeError} || error_set;
-    }
-    return error_set;
+    const read_error = if (input_kind == .reader)
+        error{ReadFailed}
+    else
+        error{};
+
+    return decode_error || read_error;
 }
 
 pub fn MatchResult(
@@ -217,7 +206,11 @@ pub fn MatchResult(
     // We need the pattern to eventually check if the .auto engine will be .dfa or .nfa (if we use .auto)
     _ = pattern;
 
-    const error_set = MatchError(options.encoding, options.decodeErrorMode, Input);
+    const error_set = MatchError(
+        options.encoding,
+        options.decodeErrorMode,
+        inputKind(options.encoding, Input),
+    );
     if (options.engine != .nfa) return if (error_set == error{}) bool else error_set!bool;
     std.debug.todo("NFA engine, determine when to use NFA in .auto");
 }
@@ -275,36 +268,24 @@ inline fn matchInner(
             @compileError("Pattern contains a NUL character but input is a NUL terminated indexable");
     };
 
-    // Switch to correct engine function
-    switch (input_kind) {
-        .reader => return try engine.matchReader(
-            options,
-            automaton,
-            operation,
-            single_char,
-            @as(*std.io.Reader, input),
-        ),
-        .char_slice, .char_slice_zero_term => return try engine.matchSlice(
-            options,
-            automaton,
-            operation,
-            single_char,
-            if (input_kind == .char_slice_zero_term)
-                std.mem.sliceTo(input, 0)
-            else
-                input,
-        ),
-        .byte_slice => {
-            var reader: std.io.Reader = .fixed(@as([]const u8, input));
-            return try engine.matchReader(
-                options,
-                automaton,
-                operation,
-                single_char,
-                &reader,
-            );
+    var reader: std.io.Reader = switch (input_kind) {
+        .reader => undefined,
+        .byte_slice => .fixed(input),
+        .char_slice => .fixed(std.mem.sliceAsBytes(input)),
+        .char_slice_zero_term => .fixed(std.mem.sliceAsBytes(std.mem.sliceTo(input, 0))),
+    };
+
+    return try engine.matchReader(
+        options,
+        automaton,
+        operation,
+        single_char,
+        input_kind,
+        switch (input_kind) {
+            .reader => input,
+            else => &reader,
         },
-    }
+    );
 }
 
 pub fn match(

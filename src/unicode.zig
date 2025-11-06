@@ -23,7 +23,7 @@ pub const Encoding = enum {
         };
     }
 
-    inline fn utf8DoNextByte(reader: *std.io.Reader, value: *u21) (std.io.Reader.Error || error{DecodeError})!void {
+    inline fn utf8DoNextByte(reader: *std.io.Reader, value: *u21) error{ ReadFailed, DecodeError }!void {
         const c = reader.takeByte() catch |err| switch (err) {
             error.EndOfStream => return error.DecodeError,
             else => |e| return e,
@@ -111,12 +111,3 @@ pub const Encoding = enum {
         }
     }
 };
-
-pub fn utf16leDecode(code_units: []const u16) !u21 {
-    return if (unicode.utf16IsHighSurrogate(code_units[0]))
-        try unicode.utf16DecodeSurrogatePair(&code_units)
-    else if (unicode.utf16IsLowSurrogate(code_units[0]))
-        error.UnexpectedSecondSurrogateHalf
-    else
-        code_units[0];
-}
