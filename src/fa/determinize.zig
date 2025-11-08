@@ -1,8 +1,8 @@
 const std = @import("std");
-const FiniteAutomaton = @import("finite_automaton");
+const FiniteAutomaton = @import("../fa/finite_automaton.zig");
 const Transition = FiniteAutomaton.Transition;
 
-const ctutils = @import("ct_utils");
+const ctutils = @import("../ct_utils.zig");
 const CtSortedList = ctutils.CtSortedList;
 const CtArrayList = ctutils.CtArrayList;
 

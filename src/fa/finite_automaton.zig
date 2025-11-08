@@ -2,9 +2,9 @@
 //! Starting state is implicitly '0' and we can grab the ending state from
 //!   as the maximum target of all transitions
 const std = @import("std");
-const Encoding = @import("unicode").Encoding;
+const Encoding = @import("../unicode.zig").Encoding;
 const ctUtf8EncodeChar = std.unicode.utf8EncodeComptime;
-const ctutils = @import("ct_utils");
+const ctutils = @import("../ct_utils.zig");
 const CtArrayList = ctutils.CtArrayList;
 const CtSortedList = ctutils.CtSortedList;
 

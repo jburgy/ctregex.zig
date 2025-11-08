@@ -1,12 +1,11 @@
 const std = @import("std");
 const dfa = @import("engines/dfa.zig");
-const unicode = @import("unicode");
+pub const Encoding = @import("unicode.zig").Encoding;
 const LL = @import("ll.zig");
-const FiniteAutomaton = @import("finite_automaton");
+const FiniteAutomaton = @import("fa/finite_automaton.zig");
 const determinize = @import("fa/determinize.zig").determinize;
 
 const ctUtf8EncodeChar = std.unicode.utf8EncodeComptime;
-pub const Encoding = unicode.Encoding;
 
 // TODO Gradually add PCRE features, mention what we support in readme
 //   and test all of them in all option combinations possible

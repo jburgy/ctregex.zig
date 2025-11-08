@@ -4,35 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const ct_utils = b.createModule(.{
-        .root_source_file = b.path("src/ct_utils.zig"),
-        .target = target,
-    });
-
-    const unicode = b.createModule(.{
-        .root_source_file = b.path("src/unicode.zig"),
-        .target = target,
-    });
-
     const mod = b.addModule("ctregex", .{
         .root_source_file = b.path("src/ctregex.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{ .name = "ct_utils", .module = ct_utils },
-            .{ .name = "unicode", .module = unicode },
-            .{
-                .name = "finite_automaton",
-                .module = b.createModule(.{
-                    .root_source_file = b.path("src/fa/finite_automaton.zig"),
-                    .target = target,
-                    .imports = &.{
-                        .{ .name = "ct_utils", .module = ct_utils },
-                        .{ .name = "unicode", .module = unicode },
-                    },
-                }),
-            },
-        },
     });
 
     const lib = b.addLibrary(.{

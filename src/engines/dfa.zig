@@ -2,11 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const root = @import("../ctregex.zig");
-const unicode = @import("unicode");
-const FiniteAutomaton = @import("finite_automaton");
+const Encoding = @import("../unicode.zig").Encoding;
+const FiniteAutomaton = @import("../fa/finite_automaton.zig");
 
 const Operation = root.Operation;
-const Encoding = root.Encoding;
 const MatchOptions = root.MatchOptions;
 const MatchError = root.MatchError;
 const InputKind = root.InputKind;
