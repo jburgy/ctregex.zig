@@ -36,7 +36,7 @@ inline fn readNextChar(
         switch (encoding) {
             .ascii, .utf8 => try reader.takeByte(),
             .utf16le => try reader.takeInt(u16, .little),
-            .codepoint => @truncate(try reader.takeInt(u32, builtin.cpu.arch.endian())),
+            .codepoint => encoding.readCodepoint(reader),
         }
     else
         try encoding.readCodepoint(reader);
@@ -93,7 +93,8 @@ pub inline fn matchReader(
         // Matched no transitions and not at end of stream
         // If we report decoding errors and we are in single char mode, check for an encoding error
         if (single_char and options.decodeErrorMode == .@"error") {
-            _ = try options.encoding.readCodepointWithFirstChar(reader, char);
+            options.encoding.give(reader, char);
+            _ = try options.encoding.readCodepoint(reader, char);
         }
 
         return false;

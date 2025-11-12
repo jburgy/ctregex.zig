@@ -5,8 +5,6 @@ const LL = @import("ll.zig");
 const FiniteAutomaton = @import("fa/finite_automaton.zig");
 const determinize = @import("fa/determinize.zig").determinize;
 
-const ctUtf8EncodeChar = std.unicode.utf8EncodeComptime;
-
 // TODO Gradually add PCRE features, mention what we support in readme
 //   and test all of them in all option combinations possible
 const PcreGrammar = struct {
@@ -71,13 +69,13 @@ const PcreGrammar = struct {
     pub fn table(comptime symbol: Symbol, comptime new_term: u21) LL.Move(Symbol) {
         return switch (symbol) {
             .start => switch (new_term) {
-                ')', '*', '+', '?', '|' => reject("Unexpected symbol '{s}' at start of input", .{ctUtf8EncodeChar(new_term)}),
+                ')', '*', '+', '?', '|' => reject("Unexpected symbol '{u}' at start of input", .{new_term}),
                 0 => .push_epsilon,
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, .seq, .alt } },
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, .seq, .alt } },
             },
             .alt0 => switch (new_term) {
-                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{s}'", .{ctUtf8EncodeChar(new_term)}),
+                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{u}'", .{new_term}),
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, .seq, .alt } },
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, .seq, .alt } },
             },
@@ -94,23 +92,20 @@ const PcreGrammar = struct {
             },
             .seq0 => switch (new_term) {
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, .seq } },
-                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{s}'", .{ctUtf8EncodeChar(new_term)}),
+                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{u}'", .{new_term}),
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, .seq } },
             },
             .seq => switch (new_term) {
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, action(.sequence), .seq } },
                 ')', '|', 0 => .push_epsilon,
-                '*', '+', '?' => reject("Unexpected symbol '{s}'", .{ctUtf8EncodeChar(new_term)}),
+                '*', '+', '?' => reject("Unexpected symbol '{u}'", .{new_term}),
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, action(.sequence), .seq } },
             },
-            .empty_stack => if (new_term == 0) .accept else reject(
-                "Expected end of input, got '{s}'",
-                .{ctUtf8EncodeChar(new_term)},
+            .empty_stack => if (new_term == 0) .accept else reject("Expected end of input, got '{u}'", .{new_term}),
+            .term => |t| if (t == new_term) .pop else reject(
+                "Expected '{u}', got '{u}'",
+                .{ t, if (new_term == 0) '␃' else new_term },
             ),
-            .term => |t| if (t == new_term) .pop else reject("Expected '{s}', got '{s}'", .{
-                ctUtf8EncodeChar(t),
-                if (new_term == 0) "EOF" else ctUtf8EncodeChar(new_term),
-            }),
             // Handled by LL
             .action => unreachable,
         };
