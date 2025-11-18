@@ -1,12 +1,9 @@
 const std = @import("std");
 const dfa = @import("engines/dfa.zig");
-const unicode = @import("unicode");
+pub const Encoding = @import("unicode.zig").Encoding;
 const LL = @import("ll.zig");
-const FiniteAutomaton = @import("finite_automaton");
+const FiniteAutomaton = @import("fa/finite_automaton.zig");
 const determinize = @import("fa/determinize.zig").determinize;
-
-const ctUtf8EncodeChar = unicode.ctUtf8EncodeChar;
-pub const Encoding = unicode.Encoding;
 
 // TODO Gradually add PCRE features, mention what we support in readme
 //   and test all of them in all option combinations possible
@@ -72,13 +69,13 @@ const PcreGrammar = struct {
     pub fn table(comptime symbol: Symbol, comptime new_term: u21) LL.Move(Symbol) {
         return switch (symbol) {
             .start => switch (new_term) {
-                ')', '*', '+', '?', '|' => reject("Unexpected symbol '{s}' at start of input", .{ctUtf8EncodeChar(new_term)}),
+                ')', '*', '+', '?', '|' => reject("Unexpected symbol '{u}' at start of input", .{new_term}),
                 0 => .push_epsilon,
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, .seq, .alt } },
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, .seq, .alt } },
             },
             .alt0 => switch (new_term) {
-                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{s}'", .{ctUtf8EncodeChar(new_term)}),
+                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{u}'", .{new_term}),
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, .seq, .alt } },
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, .seq, .alt } },
             },
@@ -95,57 +92,42 @@ const PcreGrammar = struct {
             },
             .seq0 => switch (new_term) {
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, .seq } },
-                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{s}'", .{ctUtf8EncodeChar(new_term)}),
+                ')', '*', '+', '?', '|', 0 => reject("Unexpected symbol '{u}'", .{new_term}),
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, .seq } },
             },
             .seq => switch (new_term) {
                 '(' => .{ .push = &.{ term('('), .alt0, term(')'), .mod, action(.sequence), .seq } },
                 ')', '|', 0 => .push_epsilon,
-                '*', '+', '?' => reject("Unexpected symbol '{s}'", .{ctUtf8EncodeChar(new_term)}),
+                '*', '+', '?' => reject("Unexpected symbol '{u}'", .{new_term}),
                 else => .{ .push = &.{ term(new_term), action(.char), .mod, action(.sequence), .seq } },
             },
-            .empty_stack => if (new_term == 0) .accept else reject(
-                "Expected end of input, got '{s}'",
-                .{ctUtf8EncodeChar(new_term)},
+            .empty_stack => if (new_term == 0) .accept else reject("Expected end of input, got '{u}'", .{new_term}),
+            .term => |t| if (t == new_term) .pop else reject(
+                "Expected '{u}', got '{u}'",
+                .{ t, if (new_term == 0) '␃' else new_term },
             ),
-            .term => |t| if (t == new_term) .pop else reject("Expected '{s}', got '{s}'", .{
-                ctUtf8EncodeChar(t),
-                if (new_term == 0) "EOF" else ctUtf8EncodeChar(new_term),
-            }),
             // Handled by LL
             .action => unreachable,
         };
     }
 };
 
-// Return type of nextChar.* engine functions
-pub fn NextChar(
-    comptime encoding: Encoding,
-    comptime single_char: bool,
-    comptime additional_errors: type,
-) type {
-    return if (single_char)
-        additional_errors!encoding.CharT()
-    else switch (encoding) {
-        .ascii, .codepoint => additional_errors!encoding.CharT(),
-        .utf8, .utf16le => (error{DecodeError} || additional_errors)!u21,
-    };
-}
-
-const InputKind = enum {
+pub const InputKind = enum {
     reader,
     char_slice_zero_term,
     char_slice,
     byte_slice,
 };
 
+fn isZeroTerminated(comptime Input: type) bool {
+    return if (std.meta.sentinel(Input)) |s| s == 0 else false;
+}
+
 fn inputKind(comptime encoding: Encoding, comptime Input: type) InputKind {
     const type_info = @typeInfo(Input);
-    if (type_info != .pointer) return .reader;
 
     const Char = encoding.CharT();
     const child = type_info.pointer.child;
-    const zero_terminated = if (std.meta.sentinel(Input)) |s| s == 0 else false;
 
     switch (type_info.pointer.size) {
         .slice => if (child != Char) {
@@ -153,18 +135,17 @@ fn inputKind(comptime encoding: Encoding, comptime Input: type) InputKind {
 
             @compileError("Expected input of type []const " ++ @typeName(Char) ++ ", got " ++
                 @typeName(Input));
-        } else return if (zero_terminated) .char_slice_zero_term else .char_slice,
+        } else return if (isZeroTerminated(Input)) .char_slice_zero_term else .char_slice,
         .one => {
             const child_type_info = @typeInfo(child);
             return switch (child_type_info) {
                 .array => |arr| {
-                    const child_zero_terminated = if (std.meta.sentinel(child)) |s| s == 0 else false;
                     if (arr.child != Char) {
                         if (arr.child == u8) return .byte_slice;
 
                         @compileError("Expected input of type *const [N]" ++ @typeName(Char) ++
                             ", got " ++ @typeName(Input));
-                    } else return if (child_zero_terminated) .char_slice_zero_term else .char_slice;
+                    } else return if (isZeroTerminated(child)) .char_slice_zero_term else .char_slice;
                 },
                 else => .reader,
             };
@@ -196,17 +177,19 @@ fn cachedDFA(comptime N: usize, comptime pattern: [N:0]u8) FiniteAutomaton {
 pub fn MatchError(
     comptime encoding: Encoding,
     comptime decodeErrorMode: DecodeErrorMode,
-    comptime Input: type,
+    comptime input_kind: InputKind,
 ) type {
-    var error_set = switch (inputKind(encoding, Input)) {
-        .reader => Input.Error,
-        else => error{},
-    };
+    const decode_error = if (decodeErrorMode == .@"error" and encoding.needsDecoding())
+        error{DecodeError}
+    else
+        error{};
 
-    if (decodeErrorMode == .@"error" and encoding.needsDecoding()) {
-        error_set = error{DecodeError} || error_set;
-    }
-    return error_set;
+    const read_error = if (input_kind == .reader)
+        error{ReadFailed}
+    else
+        error{};
+
+    return decode_error || read_error;
 }
 
 pub fn MatchResult(
@@ -217,7 +200,11 @@ pub fn MatchResult(
     // We need the pattern to eventually check if the .auto engine will be .dfa or .nfa (if we use .auto)
     _ = pattern;
 
-    const error_set = MatchError(options.encoding, options.decodeErrorMode, Input);
+    const error_set = MatchError(
+        options.encoding,
+        options.decodeErrorMode,
+        inputKind(options.encoding, Input),
+    );
     if (options.engine != .nfa) return if (error_set == error{}) bool else error_set!bool;
     std.debug.todo("NFA engine, determine when to use NFA in .auto");
 }
@@ -252,8 +239,6 @@ inline fn matchInner(
     comptime operation: Operation,
     input: anytype,
 ) MatchResult(options, &pattern, @TypeOf(input)) {
-    const Char = options.encoding.CharT();
-
     // TODO NFA engine and auto detection
     const automaton = switch (options.engine) {
         .auto => comptime cachedAutoFA(N, pattern),
@@ -277,37 +262,24 @@ inline fn matchInner(
             @compileError("Pattern contains a NUL character but input is a NUL terminated indexable");
     };
 
-    // Switch to correct engine function
-    switch (input_kind) {
-        .reader => return try engine.matchReader(
-            options,
-            automaton,
-            operation,
-            single_char,
-            input,
-        ),
-        .char_slice, .char_slice_zero_term => return try engine.matchSlice(
-            options,
-            automaton,
-            operation,
-            single_char,
-            input_kind == .char_slice_zero_term,
-            if (input_kind == .char_slice_zero_term)
-                @as([:0]const Char, input)
-            else
-                @as([]const Char, input),
-        ),
-        .byte_slice => {
-            var fbs = std.io.fixedBufferStream(@as([]const u8, input));
-            return try engine.matchReader(
-                options,
-                automaton,
-                operation,
-                single_char,
-                fbs.reader(),
-            );
+    var reader: std.io.Reader = switch (input_kind) {
+        .reader => undefined,
+        .byte_slice => .fixed(input),
+        .char_slice => .fixed(std.mem.sliceAsBytes(input)),
+        .char_slice_zero_term => .fixed(std.mem.sliceAsBytes(std.mem.sliceTo(input, 0))),
+    };
+
+    return try engine.matchReader(
+        options,
+        automaton,
+        operation,
+        single_char,
+        input_kind,
+        switch (input_kind) {
+            .reader => input,
+            else => &reader,
         },
-    }
+    );
 }
 
 pub fn match(
@@ -326,18 +298,28 @@ pub fn startsWith(
     return matchInner(options, pattern.len, pattern[0..].*, .starts_with, input);
 }
 
-test "DFA match" {
-    @setEvalBranchQuota(2_300);
+test match {
+    @setEvalBranchQuota(2_100);
     {
-        var fbs = std.io.fixedBufferStream("abdefé");
-        try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", fbs.reader()));
-        //std.debug.assert(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
+        var reader: std.io.Reader = .fixed("abdefé");
+        try std.testing.expect(try match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", &reader));
     }
-
-    //var fbs = std.io.fixedBufferStream("abdefé");
-    //try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", fbs.reader()));
-    std.debug.assert(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
+    try std.testing.expect(match(.{ .encoding = .utf8 }, "ab(def)*é|aghi|abz", "abdefé"));
 }
+
+test startsWith {
+    @setEvalBranchQuota(2_100);
+    {
+        var reader: std.io.Reader = .fixed("abdeffffffffé😊yoyo");
+        try std.testing.expect(try startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", &reader));
+    }
+    try std.testing.expect(startsWith(.{ .encoding = .utf8 }, "ab(def*é|aghi|abz)😊", "abdeffffffffé😊yoyo"));
+}
+
+test {
+    std.testing.refAllDecls(@This());
+}
+
 // TODO Reorganize files, only keep public interface in this file
 //   Flesh out structure of things, add `std.debug.todo`s
 // TODO Lots and lots of docs
